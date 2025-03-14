@@ -1,0 +1,504 @@
+/* Main styles for Agent Workforce */
+
+/* Basic layout */
+body {
+    padding-top: 20px;
+    transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+.chat-container {
+    height: 60vh;
+    overflow-y: auto;
+    border: 1px solid #ddd;
+    border-radius: 5px;
+    padding: 15px;
+    margin-bottom: 15px;
+    transition: background-color 0.3s ease, border-color 0.3s ease;
+}
+
+.user-message {
+    background-color: #e9ecef;
+    padding: 10px;
+    border-radius: 10px;
+    margin-bottom: 10px;
+    max-width: 80%;
+    margin-left: auto;
+    transition: background-color 0.3s ease;
+}
+
+.agent-message {
+    background-color: #d1e7dd;
+    padding: 10px;
+    border-radius: 10px;
+    margin-bottom: 10px;
+    max-width: 80%;
+    transition: background-color 0.3s ease;
+}
+
+.agent-tag {
+    font-size: 0.8em;
+    color: #666;
+    margin-bottom: 5px;
+    transition: color 0.3s ease;
+}
+
+.file-explorer {
+    border: 1px solid #ddd;
+    border-radius: 5px;
+    padding: 15px;
+    margin-bottom: 15px;
+    max-height: 300px;
+    overflow-y: auto;
+    transition: background-color 0.3s ease, border-color 0.3s ease;
+}
+
+.folder-item {
+    cursor: pointer;
+    padding: 5px;
+    border-radius: 3px;
+}
+
+.folder-item:hover {
+    background-color: #f8f9fa;
+}
+
+.file-item {
+    padding: 5px 5px 5px 20px;
+    border-radius: 3px;
+}
+
+.file-item:hover {
+    background-color: #f8f9fa;
+}
+
+.file-link {
+    text-decoration: none;
+    color: #0d6efd;
+}
+
+.screenshot-preview {
+    max-width: 100%;
+    height: auto;
+    margin-top: 10px;
+    border: 1px solid #ddd;
+    border-radius: 5px;
+}
+
+.input-textarea {
+    min-height: 100px;
+    resize: vertical;
+}
+
+.theme-toggle {
+    cursor: pointer;
+    padding: 5px 10px;
+    border-radius: 20px;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    transition: all 0.3s ease;
+}
+
+/* Dark mode specific styles */
+[data-bs-theme="dark"] {
+    --bs-body-bg: #212529;
+    --bs-body-color: #f8f9fa;
+}
+
+[data-bs-theme="dark"] .chat-container {
+    border-color: #495057;
+}
+
+[data-bs-theme="dark"] .user-message {
+    background-color: #495057;
+    color: #f8f9fa;
+}
+
+[data-bs-theme="dark"] .agent-message {
+    background-color: #2b4c40;
+    color: #f8f9fa;
+}
+
+[data-bs-theme="dark"] .agent-tag {
+    color: #adb5bd;
+}
+
+[data-bs-theme="dark"] .file-explorer {
+    border-color: #495057;
+}
+
+[data-bs-theme="dark"] .folder-item:hover,
+[data-bs-theme="dark"] .file-item:hover {
+    background-color: #343a40;
+}
+
+[data-bs-theme="dark"] .card {
+    background-color: #343a40;
+    border-color: #495057;
+}
+
+[data-bs-theme="dark"] .card-header {
+    background-color: #212529;
+    border-color: #495057;
+}
+
+/* Visual browsing styles */
+.visual-browsing-container {
+    position: relative;
+    margin-bottom: 15px;
+}
+
+.visual-controls {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.visual-progress {
+    font-size: 0.9rem;
+    color: #666;
+}
+
+.visual-description {
+    margin-top: 10px;
+    font-size: 0.9rem;
+    font-style: italic;
+}
+
+.visual-navigation {
+    display: flex;
+    gap: 10px;
+}
+
+.cursor-indicator {
+    position: absolute;
+    width: 20px;
+    height: 20px;
+    background-color: rgba(255, 0, 0, 0.5);
+    border-radius: 50%;
+    pointer-events: none;
+    transform: translate(-50%, -50%);
+    transition: all 0.3s ease;
+    animation: blink 1s infinite;
+}
+
+/* Blinking cursor animation */
+@keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+/* Streaming cursor animation */
+@keyframes typing {
+    from { border-right-color: transparent; }
+    to { border-right-color: #666; }
+}
+
+.typing-indicator {
+    display: inline-block;
+    width: 0.5em;
+    height: 1em;
+    margin-left: 2px;
+    border-right: 2px solid #666;
+    animation: typing 0.5s infinite;
+}
+
+.streaming-active .typing-indicator {
+    display: inline-block;
+}
+
+.streaming-complete .typing-indicator {
+    display: none;
+}
+
+/* Dark mode adjustments */
+[data-bs-theme="dark"] .visual-progress {
+    color: #adb5bd;
+}
+
+[data-bs-theme="dark"] .visual-description {
+    color: #adb5bd;
+}
+
+[data-bs-theme="dark"] .typing-indicator {
+    border-right-color: #adb5bd;
+}
+
+/* Screenshot gallery */
+.screenshot-gallery {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 15px;
+}
+
+.screenshot-thumbnail {
+    width: 100px;
+    height: 75px;
+    object-fit: cover;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: transform 0.2s ease;
+}
+
+.screenshot-thumbnail:hover {
+    transform: scale(1.05);
+}
+
+/* Loading animation for streaming */
+.loading-dots {
+    display: inline-flex;
+    align-items: center;
+    height: 1em;
+}
+
+.loading-dots span {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background-color: currentColor;
+    margin: 0 2px;
+    opacity: 0.6;
+    animation: loadingDots 1.4s infinite ease-in-out both;
+}
+
+.loading-dots span:nth-child(1) {
+    animation-delay: -0.32s;
+}
+
+.loading-dots span:nth-child(2) {
+    animation-delay: -0.16s;
+}
+
+@keyframes loadingDots {
+    0%, 80%, 100% { transform: scale(0); }
+    40% { transform: scale(1); }
+}
+
+/* Refresh button styles */
+#refreshFilesBtn {
+    transition: all 0.3s ease;
+    position: relative;
+    overflow: hidden;
+}
+
+#refreshFilesBtn:hover {
+    transform: scale(1.05);
+    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+}
+
+#refreshFilesBtn:active {
+    transform: scale(0.95);
+}
+
+/* Add a subtle animation when clicked */
+@keyframes refreshSpin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+#refreshFilesBtn.refreshing i {
+    animation: refreshSpin 1s linear infinite;
+}
+
+/* Enhanced message formatting */
+.message-content {
+    line-height: 1.6;
+}
+
+.content-header {
+    color: #0d6efd;
+    margin: 15px 0 10px 0;
+    font-size: 1.1rem;
+    border-bottom: 1px solid #e9ecef;
+    padding-bottom: 5px;
+}
+
+.list-item {
+    margin: 10px 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.list-number {
+    font-weight: bold;
+    color: #0d6efd;
+    margin-right: 5px;
+}
+
+.list-title {
+    font-weight: bold;
+    margin-bottom: 5px;
+}
+
+.list-content {
+    margin-left: 20px;
+    margin-bottom: 10px;
+}
+
+.bullet-point {
+    margin: 5px 0 5px 15px;
+    position: relative;
+}
+
+/* Table styling for price comparisons */
+.message-content table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 15px 0;
+}
+
+.message-content th, .message-content td {
+    border: 1px solid #ddd;
+    padding: 8px;
+    text-align: left;
+}
+
+.message-content th {
+    background-color: #f2f2f2;
+    color: #333;
+}
+
+.message-content tr:nth-child(even) {
+    background-color: #f9f9f9;
+}
+
+/* Visual browsing enhancements */
+.visual-description {
+    font-style: italic;
+    color: #6c757d;
+    margin-top: 10px;
+    padding: 5px;
+    background-color: #f8f9fa;
+    border-radius: 4px;
+}
+
+/* Dark mode adjustments */
+[data-bs-theme="dark"] .content-header {
+    color: #6ea8fe;
+    border-bottom-color: #343a40;
+}
+
+[data-bs-theme="dark"] .list-number {
+    color: #6ea8fe;
+}
+
+[data-bs-theme="dark"] .message-content th {
+    background-color: #343a40;
+    color: #f8f9fa;
+}
+
+[data-bs-theme="dark"] .message-content tr:nth-child(even) {
+    background-color: #2b3035;
+}
+
+[data-bs-theme="dark"] .visual-description {
+    background-color: #343a40;
+    color: #adb5bd;
+}
+
+.agent-message {
+    line-height: 1.5;
+}
+
+.agent-message ul, .agent-message ol {
+    padding-left: 20px;
+    margin: 10px 0;
+}
+
+/* Agent path styling */
+.agent-path {
+    font-size: 0.75em;
+    color: #6c757d;
+    margin-top: 3px;
+    padding: 2px 5px;
+    background-color: #f8f9fa;
+    border-radius: 3px;
+    display: inline-block;
+}
+
+.agent-path::before {
+    content: "Path: ";
+    font-weight: bold;
+}
+
+[data-bs-theme="dark"] .agent-path {
+    color: #adb5bd;
+    background-color: #343a40;
+}
+
+.error-message {
+    background-color: #f8d7da;
+    color: #721c24;
+    padding: 10px;
+    border-radius: 5px;
+    margin: 10px 0;
+    border-left: 4px solid #721c24;
+}
+
+[data-bs-theme="dark"] .error-message {
+    background-color: #2c2124;
+}
+
+.info-message {
+    background-color: #e7f3fe;
+    color: #0c5460;
+    padding: 10px;
+    border-radius: 5px;
+    margin: 10px 0;
+    border-left: 4px solid #0c5460;
+}
+
+.visual-monitor-container {
+    border: 1px solid #ddd;
+    border-radius: 5px;
+    padding: 15px;
+    background-color: #f8f9fa;
+}
+
+.visual-monitor {
+    min-height: 300px;
+    position: relative;
+}
+
+#visual-placeholder {
+    color: #6c757d;
+    text-align: center;
+    padding: 20px;
+    font-style: italic;
+}
+
+#current-screenshot-container {
+    position: relative;
+}
+
+#current-screenshot {
+    width: 100%;
+    border: 1px solid #ddd;
+    border-radius: 3px;
+}
+
+.cursor-indicator {
+    position: absolute;
+    width: 15px;
+    height: 15px;
+    background-color: rgba(255, 0, 0, 0.5);
+    border-radius: 50%;
+    pointer-events: none;
+    transform: translate(-50%, -50%);
+}
+
+#visual-description {
+    font-size: 0.9rem;
+    color: #495057;
+    min-height: 40px;
+}
+
+#step-indicator {
+    display: inline-block;
+    margin: 0 10px;
+    font-size: 0.9rem;
+} 

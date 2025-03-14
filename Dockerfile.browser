@@ -1,0 +1,50 @@
+# Dockerfile.browser
+FROM python:3.10-slim
+
+# Install Firefox, X11, VNC server and other dependencies
+RUN apt-get update && apt-get install -y \
+    firefox-esr \
+    wget \
+    gnupg \
+    xvfb \
+    x11vnc \
+    tigervnc-standalone-server \
+    fluxbox \
+    xterm \
+    net-tools \
+    novnc \
+    supervisor \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install geckodriver
+RUN wget https://github.com/mozilla/geckodriver/releases/download/v0.33.0/geckodriver-v0.33.0-linux64.tar.gz \
+    && tar -xzf geckodriver-v0.33.0-linux64.tar.gz -C /usr/local/bin \
+    && rm geckodriver-v0.33.0-linux64.tar.gz \
+    && chmod +x /usr/local/bin/geckodriver
+
+# Set up working directory
+WORKDIR /app
+
+# Copy requirements
+COPY requirements-browser.txt ./requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application code
+COPY browser_service.py .
+
+# Create data directory
+RUN mkdir -p /data/screenshots
+
+# Set up VNC without password
+RUN mkdir -p /root/.vnc
+# Configure noVNC for direct access without password
+RUN ln -s /usr/share/novnc/vnc.html /usr/share/novnc/index.html
+
+# Copy supervisor configuration
+COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+
+# Expose ports
+EXPOSE 5002 5900 6080
+
+# Run supervisord
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"] 

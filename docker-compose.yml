@@ -1,0 +1,15 @@
+version: '3'
+
+services:
+  browser-service:
+    build:
+      context: .
+      dockerfile: Dockerfile.browser
+    command: ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
+    ports:
+      - "5002:5002"
+      - "5900:5900"  # VNC port
+      - "6080:6080"  # noVNC web interface
+    volumes:
+      - ./user_data:/data
+    restart: unless-stopped 
