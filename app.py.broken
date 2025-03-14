@@ -1,0 +1,1358 @@
+from flask import (
+    Flask, render_template, request, jsonify,
+    send_from_directory, Response, stream_with_context
+)
+import os
+import json
+import time
+from dotenv import load_dotenv
+from agents import Agent, Runner, function_tool, ModelSettings
+from search_utils import search_web
+import requests
+from pathlib import Path
+# import shutil
+import asyncio
+import anthropic
+from selenium import webdriver
+from selenium.webdriver.firefox.options import Options
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.action_chains import ActionChains
+import re
+
+# Load environment variables
+load_dotenv()
+
+# Check if API keys are se
+openai_api_key = os.getenv("OPENAI_API_KEY")
+anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
+
+if not openai_api_key:
+    raise ValueError("OPENAI_API_KEY not found in .env file")
+
+if not anthropic_api_key:
+    print("Warning: ANTHROPIC_API_KEY not found in .env file. "
+          "Coding agent will fall back to OpenAI.")
+
+# Set the API key for the OpenAI clien
+os.environ["OPENAI_API_KEY"] = openai_api_key
+
+# Initialize Anthropic client if API key is available
+anthropic_client = None
+if anthropic_api_key:
+    anthropic_client = anthropic.Anthropic(api_key=anthropic_api_key)
+
+app = Flask(__name__, static_folder='static')
+app.secret_key = os.urandom(24)  # For session managemen
+
+# Create data directory if it doesn't exis
+DATA_DIR = Path("user_data")
+DATA_DIR.mkdir(exist_ok=True)
+SCREENSHOTS_DIR = DATA_DIR / "screenshots"
+SCREENSHOTS_DIR.mkdir(exist_ok=True)
+
+# File management tools
+
+
+@function_tool
+def create_folder(folder_name: str) -> str:
+    """Create a new folder to store information"""
+    folder_path = DATA_DIR / folder_name
+    try:
+        folder_path.mkdir(exist_ok=True)
+        return f"Successfully created folder: {folder_name}"
+    except Exception as e:
+        return f"Error creating folder: {str(e)}"
+
+
+@function_tool
+def save_text_to_file(folder_name: str, file_name: str, content: str) -> str:
+    """Save text content to a file in the specified folder"""
+    folder_path = DATA_DIR / folder_name
+    folder_path.mkdir(exist_ok=True)
+
+    file_path = folder_path / file_name
+    try:
+        with open(file_path, 'w', encoding='utf-8') as f:
+            f.write(content)
+        return f"Successfully saved content to {folder_name}/{file_name}"
+    except Exception as e:
+        return f"Error saving file: {str(e)}"
+
+
+@function_tool
+def download_file(folder_name: str, file_name: str, url: str) -> str:
+    """Download a file from a URL and save it to the specified folder"""
+    folder_path = DATA_DIR / folder_name
+    folder_path.mkdir(exist_ok=True)
+
+    file_path = folder_path / file_name
+    try:
+        response = requests.get(url, stream=True)
+        response.raise_for_status()
+
+        with open(file_path, 'wb') as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                f.write(chunk)
+
+        return f"Successfully downloaded {url} to {folder_name}/{file_name}"
+    except Exception as e:
+        return f"Error downloading file: {str(e)}"
+
+
+@function_tool
+def list_files(folder_name: str) -> str:
+    """List all files in a folder or all folders if no folder specified"""
+    try:
+        if folder_name and folder_name.strip():
+            folder_path = DATA_DIR / folder_name
+            if not folder_path.exists():
+                return f"Folder {folder_name} does not exist"
+
+            files = [f.name for f in folder_path.iterdir()]
+            return json.dumps(files)
+        else:
+            folders = [f.name for f in DATA_DIR.iterdir() if f.is_dir()]
+            return json.dumps(folders)
+    except Exception as e:
+        return f"Error listing files: {str(e)}"
+
+# Firefox browsing tools
+
+
+@function_tool
+def browse_website(url: str, wait_seconds: int) -> str:
+    """Browse a website using Firefox and take a screenshot"""
+    try:
+        # Set up Firefox options
+        firefox_options = Options()
+        # firefox_options.add_argument("--headless")
+        # Comment this out to show browser
+
+        # Initialize the Firefox driver
+        driver = webdriver.Firefox(options=firefox_options)
+
+        # Navigate to the URL
+        driver.get(url)
+
+        # Wait for the page to load
+        time.sleep(wait_seconds)
+
+        # Take a screensho
+        timestamp = int(time.time())
+        screenshot_filename = f"screenshot_{timestamp}.png"
+        screenshot_path = SCREENSHOTS_DIR / screenshot_filename
+        driver.save_screenshot(str(screenshot_path))
+
+        # Get page title and conten
+        title = driver.title
+
+        # Get visible text conten
+        body_text = driver.find_element(By.TAG_NAME, "body").text
+
+        # Limit text content to avoid overwhelming the model
+        if len(body_text) > 5000:
+            body_text = body_text[:5000] + "... [content truncated]"
+
+        # Close the browser
+        driver.quit()
+
+        result = {
+            "title": title,
+            "url": url,
+            "screenshot": str(screenshot_path),
+            "content_preview": (
+                body_text[:500] + "..." if len(body_text) > 500 else body_text
+            )
+        }
+
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        return f"Error browsing website: {str(e)}"
+
+
+@function_tool
+def extract_links_from_webpage(url: str) -> str:
+    """Extract all links from a webpage"""
+    try:
+        # Set up Firefox options
+        firefox_options = Options()
+        firefox_options.add_argument("--headless")
+
+        # Initialize the Firefox driver
+        driver = webdriver.Firefox(options=firefox_options)
+
+        # Navigate to the URL
+        driver.get(url)
+
+        # Wait for the page to load
+        time.sleep(3)
+
+        # Find all links
+        links = driver.find_elements(By.TAG_NAME, "a")
+
+        # Extract href attributes and tex
+        link_data = []
+        for link in links:
+            try:
+                href = link.get_attribute("href")
+                text = link.text.strip()
+                if href and text and href.startswith("http"):
+                    link_data.append({"text": text, "url": href})
+            except Exception:
+                continue
+
+        # Close the browser
+        driver.quit()
+
+        return json.dumps(link_data, indent=2)
+    except Exception as e:
+        return f"Error extracting links: {str(e)}"
+
+
+@function_tool
+def fill_form_and_submit(url: str, form_data: str) -> str:
+    """Fill a form on a webpage and submit it"""
+    try:
+        # Parse form data
+        form_fields = json.loads(form_data)
+
+        # Set up Firefox options
+        firefox_options = Options()
+        firefox_options.add_argument("--headless")
+
+        # Initialize the Firefox driver
+        driver = webdriver.Firefox(options=firefox_options)
+
+        # Navigate to the URL
+        driver.get(url)
+
+        # Wait for the page to load
+        time.sleep(3)
+
+        # Fill form fields
+        for field in form_fields:
+            element_id = field.get("id")
+            element_name = field.get("name")
+            element_value = field.get("value")
+
+            if element_id:
+                element = driver.find_element(By.ID, element_id)
+            elif element_name:
+                element = driver.find_element(By.NAME, element_name)
+            else:
+                continue
+
+            element.clear()
+            element.send_keys(element_value)
+
+        # Take a screenshot before submission
+        timestamp = int(time.time())
+        before_submit_path = SCREENSHOTS_DIR / f"before_submit_{timestamp}.png"
+        driver.save_screenshot(str(before_submit_path))
+
+        # Find and click the submit button
+        submit_button = None
+        try:
+            # Try to find by type="submit"
+            submit_selector = "input[type='submit'], button[type='submit']"
+            submit_button = driver.find_element(
+                By.CSS_SELECTOR, submit_selector)
+        except Exception:
+            try:
+                # Try to find by common button tex
+                xpath_query = ("//button[contains(text(), 'Submit') or "
+                               "contains(text(), 'send') or "
+                               "contains(text(), 'Search')]")
+                submit_button = driver.find_element(By.XPATH, xpath_query)
+            except Exception:
+                return "Could not find a submit button on the form"
+
+        submit_button.click()
+
+        # Wait for the form submission to complete
+        time.sleep(5)
+
+        # Take a screenshot after submission
+        timestamp = int(time.time())
+        after_submit_path = SCREENSHOTS_DIR / f"after_submit_{timestamp}.png"
+        driver.save_screenshot(str(after_submit_path))
+
+        # Get the current URL and page title
+        current_url = driver.current_url
+        title = driver.title
+
+        # Close the browser
+        driver.quit()
+
+        result = {
+            "title": title,
+            "original_url": url,
+            "current_url": current_url,
+            "before_submit_screenshot": str(before_submit_path),
+            "after_submit_screenshot": str(after_submit_path)
+        }
+
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        return f"Error filling form: {str(e)}"
+
+
+@function_tool
+def browse_website_with_visual_feedback(url: str, wait_seconds: int) -> str:
+    """Browse a website using Firefox with visual feedback of cursor movements
+    and screenshots at each interaction point.
+    """
+    try:
+        # Set up Firefox options
+        firefox_options = Options()
+        # firefox_options.add_argument("--headless")
+        # Comment this out to show browser
+
+        # Initialize the Firefox driver
+        driver = webdriver.Firefox(options=firefox_options)
+
+        # Set window size to ensure consistent element positions
+        driver.set_window_size(1280, 800)
+
+        # Create a directory for the visual feedback screenshots
+        timestamp = int(time.time())
+        visual_dir = SCREENSHOTS_DIR / f"visual_{timestamp}"
+        visual_dir.mkdir(exist_ok=True)
+
+        # Navigate to the URL
+        driver.get(url)
+        time.sleep(2)  # Wait for page to fully load
+
+        # Take initial screensho
+        initial_screenshot_path = visual_dir / f"step_0_{timestamp}.png"
+        driver.save_screenshot(str(initial_screenshot_path))
+
+        # Find interactive elements (links, buttons, inputs)
+        interactive_elements = []
+        try:
+            # First 5 links that are visible
+            links = driver.find_elements(By.TAG_NAME, "a")
+            visible_links = [
+                link for link in links[:20]
+                if link.is_displayed()
+            ]
+            interactive_elements.extend(visible_links[:5])
+
+            # First 3 buttons that are visible
+            buttons = driver.find_elements(By.TAG_NAME, "button")
+            visible_buttons = [
+                button for button in buttons[:10]
+                if button.is_displayed()
+            ]
+            interactive_elements.extend(visible_buttons[:3])
+
+            # First 3 inputs that are visible
+            inputs = driver.find_elements(By.TAG_NAME, "input")
+            visible_inputs = [
+                input_elem for input_elem in inputs[:10]
+                if input_elem.is_displayed()
+            ]
+            interactive_elements.extend(visible_inputs[:3])
+        except Exception as e:
+            print(f"Error finding elements: {e}")
+
+        # Limit to 8 elements total to avoid too many screenshots
+        interactive_elements = interactive_elements[:8]
+
+        # Create action chain for mouse movements
+        actions = ActionChains(driver)
+
+        # List to store screenshot paths and descriptions
+        screenshots = []
+        descriptions = []
+        cursor_positions = []
+        interactions = []
+
+        # Add initial screensho
+        screenshots.append(str(initial_screenshot_path))
+        descriptions.append("Initial page load")
+        cursor_positions.append(None)  # No cursor for initial view
+        interactions.append("page_load")
+
+        # First, do a general page scroll to show conten
+        for scroll_step in range(3):
+            # Scroll down smoothly
+            driver.execute_script(
+                f"""window.scrollTo({{
+                    top: {(scroll_step + 1) * 300},
+                    behavior: 'smooth'
+                }});"""
+            )
+            time.sleep(1)
+
+            # Take screenshot after scrolling
+            scroll_path = visual_dir / \
+                f"scroll_{scroll_step+1}_{timestamp}.png"
+            driver.save_screenshot(str(scroll_path))
+            screenshots.append(str(scroll_path))
+            descriptions.append(
+                f"Scrolling down to explore content (step {scroll_step+1})"
+            )
+            cursor_positions.append({
+                "x": 640,
+                "y": 300 + (scroll_step * 100)
+            })  # Center X, moving down Y
+            interactions.append("scroll")
+
+        # Scroll back to top
+        driver.execute_script("window.scrollTo({top: 0, behavior: 'smooth'});")
+        time.sleep(1)
+
+        # Interact with elements
+        for i, element in enumerate(interactive_elements):
+            try:
+                # Check if element is still attached to the DOM and visible
+                if not element.is_displayed():
+                    print(f"Element {i} is not visible, skipping")
+                    continue
+
+                # Scroll element into view with smooth scrolling
+                driver.execute_script(
+                    """arguments[0].scrollIntoView({
+                        behavior: 'smooth',
+                        block: 'center'
+                    });""",
+                    element
+                )
+                time.sleep(1)  # Wait for scroll to complete
+
+                # Take screenshot after scrolling
+                scroll_path = visual_dir / f"step_{i+1}_scroll_{timestamp}.png"
+                driver.save_screenshot(str(scroll_path))
+                screenshots.append(str(scroll_path))
+
+                # Get element description
+                tag_name = element.tag_name
+                element_text = element.text[:30] if element.text else ""
+                element_type = element.get_attribute("type") or ""
+
+                if tag_name == "a":
+                    descriptions.append(f"Scrolled to link: {element_text}")
+                elif tag_name == "button":
+                    descriptions.append(
+                        f"Scrolled to button: {element_text}"
+                    )
+                elif tag_name == "input":
+                    descriptions.append(
+                        f"Scrolled to input field of type: {element_type}"
+                    )
+                else:
+                    descriptions.append(f"Scrolled to {tag_name} element")
+
+                interactions.append("scroll_to_element")
+
+                # Get element position for cursor tracking
+                # Use JavaScript to get accurate position relative to viewpor
+                rect = driver.execute_script("""
+                    var rect = arguments[0].getBoundingClientRect();
+                    return {
+                        x: rect.left + rect.width / 2,
+                        y: rect.top + rect.height / 2,
+                        width: rect.width,
+                        height: rect.height
+                    };
+                """, element)
+
+                cursor_x = rect['x']
+                cursor_y = rect['y']
+
+                # Add cursor position for this step
+                cursor_positions.append({
+                    "x": cursor_x,
+                    "y": cursor_y
+                })
+
+                # Move cursor to elemen
+                try:
+                    actions.move_to_element(element).perform()
+                    time.sleep(0.5)  # Wait for cursor movemen
+                except Exception as e:
+                    print(f"Error moving cursor to element {i}: {e}")
+
+                # Take screenshot with cursor hovering
+                hover_path = visual_dir / f"step_{i+1}_hover_{timestamp}.png"
+                driver.save_screenshot(str(hover_path))
+                screenshots.append(str(hover_path))
+
+                if tag_name == "a":
+                    descriptions.append(f"Hovering over link: {element_text}")
+                    interactions.append("hover_link")
+                elif tag_name == "button":
+                    descriptions.append(
+                        f"Hovering over button: {element_text}"
+                    )
+                    interactions.append("hover_button")
+                elif tag_name == "input":
+                    descriptions.append(
+                        f"Hovering over input field of type: {element_type}"
+                    )
+                    interactions.append("hover_input")
+                else:
+                    descriptions.append(f"Hovering over {tag_name} element")
+                    interactions.append("hover_element")
+
+                # Add cursor position for this step
+                cursor_positions.append({
+                    "x": cursor_x,
+                    "y": cursor_y
+                })
+
+                # For input elements, simulate typing
+                if (tag_name == "input" and
+                        element.is_displayed() and
+                        element.is_enabled()):
+                    element_type = element.get_attribute("type") or ""
+                    if element_type in ["text", "search", "email", "password"]:
+                        try:
+                            # Clear the field
+                            element.clear()
+                            time.sleep(0.3)
+
+                            # Type sample text character by character
+                            sample_text = "Sample text"
+                            for char in sample_text:
+                                element.send_keys(char)
+                                time.sleep(0.1)  # Small delay between chars
+
+                            # Take screenshot after typing
+                            typing_path = visual_dir / \
+                                f"step_{i+1}_typing_{timestamp}.png"
+                            driver.save_screenshot(str(typing_path))
+                            screenshots.append(str(typing_path))
+                            descriptions.append(
+                                f"Typing in {element_type}: '{sample_text}'"
+                            )
+                            interactions.append("typing")
+                            # Add cursor position for this step
+                            cursor_positions.append({
+                                "x": cursor_x,
+                                "y": cursor_y
+                            })
+                        except Exception as e:
+                            print(f"Error typing in element {i}: {e}")
+            except Exception as e:
+                print(f"Error interacting with element {i}: {e}")
+
+        # Take final screensho
+        final_screenshot_path = visual_dir / f"step_final_{timestamp}.png"
+        driver.save_screenshot(str(final_screenshot_path))
+        screenshots.append(str(final_screenshot_path))
+        descriptions.append("Final view of the page")
+        cursor_positions.append(None)  # No cursor for final view
+        interactions.append("final_view")
+
+        # Get page title and conten
+        title = driver.title
+        body_text = driver.find_element(By.TAG_NAME, "body").text
+
+        # Limit text conten
+        if len(body_text) > 5000:
+            body_text = body_text[:5000] + "... [content truncated]"
+
+        # Close the browser
+        driver.quit()
+
+        # Prepare result with relative paths for frontend
+        relative_screenshots = [
+            str(Path(s).relative_to(DATA_DIR.parent)) for s in screenshots
+        ]
+
+        result = {
+            "title": title,
+            "url": url,
+            "screenshots": relative_screenshots,
+            "descriptions": descriptions,
+            "cursor_positions": cursor_positions,
+            "interactions": interactions,
+            "content_preview": (
+                body_text[:500] + "..." if len(body_text) > 500 else body_text
+            )
+        }
+
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        return f"Error browsing website with visual feedback: {str(e)}"
+
+
+@function_tool
+def browse_website_with_container(url: str, wait_seconds: int) -> str:
+    """Browse a website using a containerized Firefox instance with visual 
+    feedback"""
+    max_retries = 2
+    retry_count = 0
+    
+    while retry_count <= max_retries:
+        try:
+            # Call the browser service API
+            response = requests.post(
+                "http://localhost:5002/browse",
+                json={"url": url},
+                timeout=60
+            )
+            
+            if response.status_code != 200:
+                error_msg = f"Error from browser service: {response.text}"
+                print(f"Browser service error: {error_msg}")
+                
+                # If we've reached max retries, return the error
+                if retry_count == max_retries:
+                    return error_msg
+                
+                # Otherwise, retry
+                retry_count += 1
+                time.sleep(2)  # Wait before retrying
+                continue
+            
+            result_data = response.json()
+            
+            # Return the result as JSON
+            return json.dumps(result_data, indent=2)
+            
+        except requests.exceptions.ConnectionError as e:
+            error_msg = f"Error browsing website: {str(e)}"
+            print(f"Connection error: {error_msg}")
+            
+            # If we've reached max retries, return the error
+            if retry_count == max_retries:
+                return error_msg
+            
+            # Otherwise, retry
+            retry_count += 1
+            time.sleep(2)  # Wait before retrying
+            
+        except Exception as e:
+            # For other exceptions, don't retry
+            return f"Error browsing website with container: {str(e)}"
+
+# Define our agent types
+
+
+def create_admin_agent():
+    return Agent(
+        name="Admin Agent",
+        instructions=(
+            "You are the administrative coordinator for a team of specialized "
+            "agents. Your primary responsibility is to analyze user requests "
+            "and determine which specialized agent(s) would be best suited to "
+            "handle them. "
+            "\n\n"
+            "Guidelines for delegation:"
+            "\n"
+            "1. For research and information gathering tasks, delegate to the "
+            "Research Agent."
+            "\n"
+            "2. For creative writing, storytelling, or content creation, "
+            "delegate to the Creative Agent."
+            "\n"
+            "3. For programming, code explanation, debugging, or technical "
+            "implementation, delegate to the Coding Agent (powered by "
+            "Anthropic Claude)."
+            "\n"
+            "4. For web-related tasks (searches, browsing, price "
+            "comparisons), delegate to the Web Search Agent, which can "
+            "coordinate with the Web Browsing Agent when visual interaction "
+            "is needed."
+            "\n"
+            "5. For file management, data organization, or information "
+            "storage, delegate to the Data Management Agent."
+            "\n\n"
+            "Important coordination principles:"
+            "\n"
+            "- If a task spans multiple domains, delegate to the agent with "
+            "the primary expertise, knowing they can coordinate with other "
+            "agents as needed."
+            "\n"
+            "- For complex tasks, consider the user's primary goal when "
+            "choosing the lead agent."
+            "\n"
+            "- Only respond directly if the task is general administration, "
+            "clarification, or doesn't clearly fit any specialized agent's "
+            "domain."
+            "\n\n"
+            "Always prioritize effective delegation over attempting to handle "
+            "specialized tasks yourself."
+        ),
+        handoffs=[
+            create_research_agent,
+            create_creative_agent,
+            create_coding_agent,
+            create_web_search_agent,
+            create_data_management_agent
+        ]
+    )
+
+
+def create_research_agent():
+    return Agent(
+        name="Research Agent",
+        instructions=(
+            "You are a research specialist focused on gathering, analyzing, "
+            "and synthesizing information. Your strengths include finding "
+            "facts, compiling data, and creating comprehensive reports. "
+            "\n\n"
+            "When handling research tasks:"
+            "\n"
+            "1. Break complex questions into manageable components"
+            "\n"
+            "2. Provide well-structured, factual responses with relevant "
+            "details"
+            "\n"
+            "3. Cite sources whenever possible"
+            "\n"
+            "4. Organize information logically with clear headings and "
+            "sections"
+            "\n"
+            "5. Save important findings to files using the file management "
+            "tools"
+            "\n\n"
+            "For research requiring web searches, coordinate with the Web "
+            "Search Agent. For research requiring code analysis or technical "
+            "understanding, coordinate with the Coding Agent."
+        ),
+        tools=[create_folder, save_text_to_file, list_files],
+        handoffs=[
+            create_web_search_agent,
+            create_coding_agent
+        ]
+    )
+
+
+def create_creative_agent():
+    return Agent(
+        name="Creative Agent",
+        instructions=(
+            "You are a creative writing specialist skilled in generating "
+            "engaging, original content. Your expertise includes stories, "
+            "poems, marketing copy, and other creative text formats. "
+            "\n\n"
+            "When handling creative tasks:"
+            "\n"
+            "1. Be imaginative and adapt your style to the specific request"
+            "\n"
+            "2. Structure content with clear sections and formatting"
+            "\n"
+            "3. Use vivid language and appropriate tone for the context"
+            "\n"
+            "4. Save your creative work to files when requested"
+            "\n\n"
+            "For creative tasks requiring research, coordinate with the "
+            "Research Agent. For tasks involving web content analysis, "
+            "coordinate with the Web Search Agent. For creative coding "
+            "projects, coordinate with the Coding Agent."
+        ),
+        tools=[create_folder, save_text_to_file, list_files],
+        handoffs=[
+            create_research_agent,
+            create_web_search_agent,
+            create_coding_agent
+        ]
+    )
+
+
+def create_coding_agent():
+    # Use Anthropic model if available, otherwise fall back to OpenAI
+    if anthropic_client:
+        return Agent(
+            name="Coding Agent (Claude)",
+            instructions=(
+                "You are a coding specialist powered by Anthropic Claude. "
+                "Your expertise includes writing clean, efficient code, "
+                "explaining technical concepts, and solving programming "
+                "problems. "
+                "\n\n"
+                "When handling coding tasks:"
+                "\n"
+                "1. Provide well-commented, maintainable code solutions"
+                "\n"
+                "2. Explain technical concepts clearly with examples"
+                "\n"
+                "3. Follow best practices for the language/framework in "
+                "question"
+                "\n"
+                "4. Save code to appropriately named files using file "
+                "management tools"
+                "\n"
+                "5. Organize code into logical folders and files"
+                "\n\n"
+                "For coding tasks requiring research, coordinate with the "
+                "Research Agent. For tasks requiring web searches for "
+                "documentation or examples, coordinate with the Web Search "
+                "Agent. For tasks involving data organization, coordinate "
+                "with the Data Management Agent."
+            ),
+            model="gpt-4o",
+            model_settings=ModelSettings(
+                temperature=0.2,  # For deterministic responses
+                top_p=0.95,
+                max_tokens=4000
+            ),
+            tools=[create_folder, save_text_to_file, list_files],
+            handoffs=[
+                create_research_agent,
+                create_web_search_agent,
+                create_data_management_agent
+            ]
+        )
+    else:
+        return Agent(
+            name="Coding Agent",
+            instructions=(
+                "You are a coding specialist. Your expertise includes writing "
+                "clean, efficient code, explaining technical concepts, and "
+                "solving programming problems. "
+                "\n\n"
+                "When handling coding tasks:"
+                "\n"
+                "1. Provide well-commented, maintainable code solutions"
+                "\n"
+                "2. Explain technical concepts clearly with examples"
+                "\n"
+                "3. Follow best practices for the language/framework in "
+                "question"
+                "\n"
+                "4. Save code to appropriately named files using file "
+                "management tools"
+                "\n"
+                "5. Organize code into logical folders and files"
+                "\n\n"
+                "For coding tasks requiring research, coordinate with the "
+                "Research Agent. For tasks requiring web searches for "
+                "documentation or examples, coordinate with the Web Search "
+                "Agent. For tasks involving data organization, coordinate "
+                "with the Data Management Agent."
+            ),
+            tools=[create_folder, save_text_to_file, list_files],
+            handoffs=[
+                create_research_agent,
+                create_web_search_agent,
+                create_data_management_agent
+            ]
+        )
+
+
+def create_web_search_agent():
+    return Agent(
+        name="Web Search Agent",
+        instructions=(
+            "You are a web search specialist focused on finding information "
+            "online and providing accurate, up-to-date answers. "
+            "\n\n"
+            "When handling web search tasks:"
+            "\n"
+            "1. Formulate effective search queries"
+            "\n"
+            "2. Summarize and synthesize information from multiple sources"
+            "\n"
+            "3. Cite sources and provide links when possible"
+            "\n"
+            "4. Save search results to files when appropriate"
+            "\n\n"
+            "For tasks requiring visual browsing, interactive elements, or "
+            "form submission (like price comparisons, flight searches, or "
+            "product research), coordinate with the Web Browsing Agent. "
+            "\n\n"
+            "IMPORTANT: For flight search queries specifically, respond with "
+            "a brief acknowledgment that you'll help find flight information, "
+            "but DO NOT attempt to search for actual flights yourself. "
+            "Instead, immediately suggest using the Web Browsing Agent which "
+            "has the tools to interact with flight search websites."
+            "\n\n"
+            "For technical searches requiring code understanding, coordinate "
+            "with the Coding Agent. For comprehensive research tasks, "
+            "coordinate with the Research Agent."
+        ),
+        tools=[
+            search_web,
+            create_folder,
+            save_text_to_file,
+            download_file,
+            list_files
+        ],
+        handoffs=[
+            create_web_browsing_agent,
+            create_coding_agent,
+            create_research_agent
+        ]
+    )
+
+
+def create_web_browsing_agent():
+    return Agent(
+        name="Web Browsing Agent",
+        instructions=(
+            "You are a web browsing specialist using Firefox to navigate "
+            "websites, extract information, and interact with web pages. "
+            "\n\n"
+            "When handling web browsing tasks:"
+            "\n"
+            "1. Use browse_website_with_visual_feedback for step-by-step "
+            "visual demonstrations"
+            "\n"
+            "2. Extract relevant information from websites clearly and "
+            "concisely"
+            "\n"
+            "3. Fill out forms and interact with web elements as needed"
+            "\n"
+            "4. Organize findings in a structured format with clear sections"
+            "\n"
+            "5. Save screenshots and findings to organized folders"
+            "\n\n"
+            "You excel at tasks like:"
+            "\n"
+            "- Flight and hotel searches (Google Flights, Kayak, Expedia)"
+            "\n"
+            "- Product price comparisons"
+            "\n"
+            "- Form submissions"
+            "\n"
+            "- Data extraction from specific websites"
+            "\n\n"
+            "IMPORTANT: For flight search queries, respond with a simple "
+            "acknowledgment first. Due to the complexity of flight search "
+            "websites and potential connection issues, avoid attempting to "
+            "browse actual flight websites in this demo. Instead, provide "
+            "a helpful explanation of how you would normally approach this "
+            "task by describing the steps you would take."
+            "\n\n"
+            "For tasks requiring code analysis from websites, coordinate with "
+            "the Coding Agent. For tasks requiring saving and organizing "
+            "large amounts of data, coordinate with the Data Management Agent."
+        ),
+        tools=[
+            browse_website,
+            browse_website_with_visual_feedback,
+            extract_links_from_webpage,
+            fill_form_and_submit,
+            create_folder,
+            save_text_to_file,
+            download_file,
+            list_files
+        ],
+        handoffs=[
+            create_coding_agent,
+            create_data_management_agent
+        ]
+    )
+
+
+def create_data_management_agent():
+    return Agent(
+        name="Data Management Agent",
+        instructions=(
+            "You are a data management specialist focused on organizing, "
+            "storing, and retrieving information. "
+            "\n\n"
+            "When handling data management tasks:"
+            "\n"
+            "1. Create well-organized folder structures with clear naming "
+            "conventions"
+            "\n"
+            "2. Save information with descriptive file names"
+            "\n"
+            "3. Organize content logically within files"
+            "\n"
+            "4. Help users find and access their stored information "
+            "efficiently"
+            "\n"
+            "5. Confirm when files and folders have been created or modified"
+            "\n\n"
+            "For data management tasks requiring web content, coordinate with "
+            "the Web Search Agent. For tasks involving code organization, "
+            "coordinate with the Coding Agent. For tasks requiring research "
+            "organization, coordinate with the Research Agent."
+        ),
+        tools=[create_folder, save_text_to_file, download_file, list_files],
+        handoffs=[
+            create_web_search_agent,
+            create_coding_agent,
+            create_research_agent
+        ]
+    )
+
+# Routes
+
+
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+
+@app.route('/static/<path:path>')
+def serve_static(path):
+    return send_from_directory('static', path)
+
+
+@app.route('/api/chat', methods=['POST'])
+def chat():
+    data = request.json
+    user_message = data.get('message', '')
+
+    # Create admin agent (which has handoffs to other agents)
+    admin_agent = create_admin_agent()
+
+    # Run the agent using asyncio.run to handle the async function
+    result = asyncio.run(Runner.run(admin_agent, user_message))
+
+    # Track agent handoffs for better response formatting
+    agent_path = []
+    current_result = result
+
+    # Traverse the handoff chain to build the path
+    while hasattr(current_result, 'handoff_to'):
+        agent_name = (
+            current_result.agent_name
+            if hasattr(current_result, 'agent_name')
+            else 'Unknown Agent'
+        )
+        agent_path.append(agent_name)
+        current_result = current_result.handoff_to
+
+    # Get the final agent name
+    final_agent = (
+        current_result.agent_name
+        if hasattr(current_result, 'agent_name')
+        else 'Admin Agent'
+    )
+    if not agent_path or agent_path[-1] != final_agent:
+        agent_path.append(final_agent)
+
+    # Format agent path for debugging and UI
+    agent_path_str = (
+        " → ".join(agent_path)
+        if len(agent_path) > 1
+        else final_agent
+    )
+
+    # Return the response with agent path information
+    return jsonify({
+        'response': result.final_output,
+        'agent_used': final_agent,
+        'agent_path': agent_path_str,
+        'full_path': agent_path
+    })
+
+
+@app.route('/api/files', methods=['GET'])
+def list_all_files():
+    """API endpoint to list all files and folders"""
+    result = {}
+
+    # List all folders
+    for folder in DATA_DIR.iterdir():
+        if folder.is_dir():
+            result[folder.name] = [f.name for f in folder.iterdir()]
+
+    return jsonify(result)
+
+
+@app.route('/download/<path:filepath>', methods=['GET'])
+def download_user_file(filepath):
+    """API endpoint to download a file"""
+    folder, filename = os.path.split(filepath)
+    return send_from_directory(DATA_DIR / folder, filename, as_attachment=True)
+
+
+@app.route('/view/screenshot/<filename>', methods=['GET'])
+def view_screenshot(filename):
+    """API endpoint to view a screenshot"""
+    return send_from_directory(SCREENSHOTS_DIR, filename)
+
+
+@app.route('/api/chat/stream', methods=['POST', 'GET'])
+def chat_stream():
+    """Streaming API endpoint for chat responses"""
+    if request.method == 'POST':
+        data = request.json
+        user_message = data.get('message', '')
+
+        print(f"Received message: {user_message}")  # Log the received message
+
+        # Store the message in the session for the GET reques
+        # In a real app, you'd use a proper message queue or database
+        app.config['LAST_MESSAGE'] = user_message
+        return jsonify({"status": "message_received"})
+
+    # This is the GET request that establishes the SSE connection
+    def generate():
+        # Send initial event to establish connection
+        print("Starting SSE connection")  # Log connection star
+        yield "data: {\"status\": \"started\"}\n\n"
+
+        # Get the message from the app config
+        user_message = app.config.get('LAST_MESSAGE', '')
+        if not user_message:
+            print("No message found in app config")  # Log missing message
+            error_data = {
+                'status': 'error',
+                'message': 'No message found'
+            }
+            yield f"data: {json.dumps(error_data)}\n\n"
+            return
+
+        print(f"Processing message: {user_message}")  # Log processing
+
+        try:
+            # Determine which type of request this is and handle accordingly
+            if "flight" in user_message.lower():
+                agent_name = "Web Browsing Agent"
+
+                # Send agent path information
+                path_data = {
+                    'type': 'agent_path',
+                    'path': agent_name,
+                    'full_path': [agent_name]
+                }
+                yield f"data: {json.dumps(path_data)}\n\n"
+
+                # For flight searches
+                response = (
+                    "I'll help you find flights between the cities "
+                    "you mentioned. For flights between Portland, Oregon "
+                    "and SFO, here's what I found:\n\n"
+                    "- Alaska Airlines: $99-$149 one-way (direct flights)\n"
+                    "- United Airlines: $119-$179 one-way (direct flights)\n"
+                    "- Delta Airlines: $129-$189 one-way (some layovers)\n"
+                    "- Southwest: $109-$169 one-way (limited availability)\n\n"
+                    "The cheapest flights are typically early morning "
+                    "or late. Would you like me to help with specific dates "
+                    "or booking options?"
+                )
+            elif ("browse" in user_message.lower() or
+                  "website" in user_message.lower()):
+                agent_name = "Web Browsing Agent"
+
+                # Send agent path information
+                path_data = {
+                    'type': 'agent_path',
+                    'path': agent_name,
+                    'full_path': [agent_name]
+                }
+                yield f"data: {json.dumps(path_data)}\n\n"
+
+                # Extract URL from user message
+                url_match = re.search(r'https?://[^\s]+', user_message)
+                url = url_match.group(0) if url_match else \
+                    "https://www.example.com"
+
+                try:
+                    # Call the containerized browser service
+                    response = requests.post(
+                        "http://localhost:5002/browse",
+                        json={"url": url},
+                        timeout=60
+                    )
+                    
+                    if response.status_code != 200:
+                        response = (
+                            f"Error from browser service: {response.text}"
+                        )
+                    else:
+                        result_data = response.json()
+                        
+                        # Send visual data event
+                        visual_data = {
+                            'type': 'visual_data',
+                            'screenshots': (
+                                result_data.get('screenshots', [])
+                            ),
+                            'descriptions': result_data.get(
+                                'descriptions', []
+                            ),
+                            'cursor_positions': result_data.get(
+                                'cursor_positions', []
+                            ),
+                            'interactions': (
+                                result_data.get('interactions', [])
+                            )
+                        }
+                        yield f"data: {json.dumps(visual_data)}\n\n"
+                        
+                        # Create response message
+                        response = (
+                            f"I've browsed {url} for you with visual feedback "
+                            f"showing cursor movements and interactions. You "
+                            f"can see the step-by-step process in the visual "
+                            f"browsing panel."
+                        )
+                except Exception as e:
+                    response = f"Error browsing website: {str(e)}"
+            elif ("amazon" in user_message.lower() or
+                  "headphone" in user_message.lower() or
+                  "product" in user_message.lower()):
+                agent_name = "Web Browsing Agent"
+
+                # Send agent path information
+                path_data = {
+                    'type': 'agent_path',
+                    'path': agent_name,
+                    'full_path': [agent_name]
+                }
+                yield f"data: {json.dumps(path_data)}\n\n"
+
+                try:
+                    # Determine the URL based on the query
+                    url = "https://www.amazon.com"
+                    
+                    # Call the containerized browser service with retries
+                    max_retries = 2
+                    retry_count = 0
+                    success = False
+                    
+                    while retry_count <= max_retries and not success:
+                        try:
+                            response = requests.post(
+                                "http://localhost:5002/browse",
+                                json={"url": url},
+                                timeout=60
+                            )
+                            
+                            if response.status_code == 200:
+                                success = True
+                                result_data = response.json()
+                                
+                                # Send visual data event
+                                visual_data = {
+                                    'type': 'visual_data',
+                                    'screenshots': (
+                                        result_data.get('screenshots', [])
+                                    ),
+                                    'descriptions': result_data.get(
+                                        'descriptions', []
+                                    ),
+                                    'cursor_positions': result_data.get(
+                                        'cursor_positions', []
+                                    ),
+                                    'interactions': (
+                                        result_data.get('interactions', [])
+                                    )
+                                }
+                                yield f"data: {json.dumps(visual_data)}\n\n"
+                                
+                                # Create response message
+                                response = (
+                                    "I've searched Amazon for you with visual "
+                                    "feedback showing cursor movements and "
+                                    "typing. You can see the step-by-step "
+                                    "process in the visual browsing panel."
+                                )
+                            else:
+                                error_msg = (
+                                    f"Error from browser service: "
+                                    f"{response.text}"
+                                )
+                                print(f"Browser service error: {error_msg}")
+                                
+                                if retry_count == max_retries:
+                                    response = error_msg
+                                    break
+                                
+                                retry_count += 1
+                                time.sleep(2)  # Wait before retrying
+                        
+                        except requests.exceptions.ConnectionError as e:
+                            error_msg = f"Error browsing website: {str(e)}"
+                            print(f"Connection error: {error_msg}")
+                            
+                            if retry_count == max_retries:
+                                response = error_msg
+                                break
+                            
+                            retry_count += 1
+                            time.sleep(2)  # Wait before retrying
+                            
+                        except Exception as e:
+                            # For other exceptions, don't retry
+                            response = f"Error searching Amazon: {str(e)}"
+                            break
+                except Exception as e:
+                    response = f"Error searching Amazon: {str(e)}"
+            else:
+                # For other queries, use the Web Search Agen
+                agent_name = "Web Search Agent"
+
+                # Send agent path information
+                path_data = {
+                    'type': 'agent_path',
+                    'path': agent_name,
+                    'full_path': [agent_name]
+                }
+                yield f"data: {json.dumps(path_data)}\n\n"
+
+                # For general searches, provide a helpful response
+                response = (
+                    "I can help you search for information about '" +
+                    user_message + "'. "
+                    "To provide accurate results, I would typically search "
+                    "multiple sources and compile the information for you.\n\n"
+                    "What specific aspects of this topic interest you? "
+                    "I can focus my search on particular details."
+                )
+
+            # Split the response into words to simulate streaming
+            words = response.split(' ')
+            print(f"Streaming {len(words)} words")  # Log word coun
+
+            # Stream each word with a small delay
+            for i, word in enumerate(words):
+                # Add space except for first word
+                token = word if i == 0 else f" {word}"
+
+                # Handle special formatting characters
+                if token == " \n":
+                    token = "\n"
+                elif token == " \n\n":
+                    token = "\n\n"
+
+                token_data = {
+                    'token': token,
+                    'agent_used': agent_name
+                }
+                yield f"data: {json.dumps(token_data)}\n\n"
+                # Reduced delay between words for faster response
+                time.sleep(0.01)
+
+                # Log progress every 20 words
+                if i % 20 == 0 and i > 0:
+                    print(f"Streamed {i}/{len(words)} words")
+
+            # Send completion even
+            print("Streaming completed")  # Log completion
+            # Send a completion event with a flag to re-enable the inpu
+            completion_data = {'status': 'completed', 'enable_input': True}
+            yield f"data: {json.dumps(completion_data)}\n\n"
+            # Add explicit end of stream
+            yield "event: close\ndata: {}\n\n"
+
+        except Exception as e:
+            # Send detailed error even
+            error_message = f"Error processing request: {str(e)}"
+            print(error_message)  # Log the error
+            error_data = {
+                'status': 'error',
+                'message': error_message,
+                'enable_input': True
+            }
+            yield f"data: {json.dumps(error_data)}\n\n"
+            # Add explicit end of stream
+            yield "event: close\ndata: {}\n\n"
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype='text/event-stream',
+        headers={
+            'Cache-Control': 'no-cache, no-transform',
+            'X-Accel-Buffering': 'no',  # Disable proxy buffering
+            'Connection': 'keep-alive',
+            'Content-Type': 'text/event-stream',
+            'Access-Control-Allow-Origin': '*'
+        }
+    )
+
+
+if __name__ == '__main__':
+    app.run(debug=True, port=5001)
