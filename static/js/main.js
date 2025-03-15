@@ -381,7 +381,12 @@ document.addEventListener('DOMContentLoaded', function() {
                     messageDiv.classList.remove('streaming-active');
                     
                     // Process any visual browsing data in the response
-                    processVisualBrowsingData(responseText);
+                    const hasVisualData = processVisualBrowsingData(responseText);
+                    
+                    // If no visual browsing data was found, hide the VNC viewer
+                    if (!hasVisualData && !responseText.includes('browse') && !responseText.includes('website')) {
+                        hideVncViewer();
+                    }
                     
                     // Mark as intentionally closed to prevent auto-reconnect
                     intentionallyClosed = true;
@@ -579,6 +584,93 @@ document.addEventListener('DOMContentLoaded', function() {
     // Initial load of files
     loadFiles();
 
+    // Function to show the VNC viewer iframe
+    function showVncViewer() {
+        const vncContainer = document.getElementById('vnc-container');
+        const vncIframe = document.getElementById('vnc-iframe');
+        const toggleBtn = document.getElementById('toggle-vnc-btn');
+        
+        if (vncContainer && vncIframe) {
+            // Set the iframe source to the VNC viewer URL
+            // Use the same origin as the current page to avoid cross-origin issues
+            const protocol = window.location.protocol;
+            const hostname = window.location.hostname;
+            const port = window.location.port;
+            vncIframe.src = `${protocol}//${hostname}:${port}/vnc`;
+            
+            // Show the container
+            vncContainer.style.display = 'block';
+            
+            // Update toggle button text
+            if (toggleBtn) {
+                toggleBtn.textContent = 'Hide Viewer';
+            }
+            
+            console.log('VNC viewer displayed');
+        } else {
+            console.error('VNC container or iframe not found');
+        }
+    }
+    
+    // Automatically show VNC viewer when visual content is displayed
+    document.addEventListener('DOMContentLoaded', function() {
+        // Add event listener for visual content display
+        const visualContent = document.getElementById('visual-content');
+        const visualPlaceholder = document.getElementById('visual-placeholder');
+        
+        // Create a MutationObserver to watch for style changes
+        const observer = new MutationObserver(function(mutations) {
+            mutations.forEach(function(mutation) {
+                if (mutation.attributeName === 'style' && 
+                    visualContent.style.display === 'block' && 
+                    visualPlaceholder.style.display === 'none') {
+                    // Visual content is now displayed, show VNC viewer
+                    showVncViewer();
+                }
+            });
+        });
+        
+        // Start observing
+        if (visualContent) {
+            observer.observe(visualContent, { attributes: true });
+        }
+    });
+    
+    // Function to hide the VNC viewer iframe
+    function hideVncViewer() {
+        const vncContainer = document.getElementById('vnc-container');
+        const vncIframe = document.getElementById('vnc-iframe');
+        const toggleBtn = document.getElementById('toggle-vnc-btn');
+        
+        if (vncContainer && vncIframe) {
+            // Clear the iframe source
+            vncIframe.src = '';
+            
+            // Hide the container
+            vncContainer.style.display = 'none';
+            
+            // Update toggle button text
+            if (toggleBtn) {
+                toggleBtn.textContent = 'Show Viewer';
+            }
+            
+            console.log('VNC viewer hidden');
+        }
+    }
+    
+    // Toggle VNC viewer visibility
+    function toggleVncViewer() {
+        const vncContainer = document.getElementById('vnc-container');
+        
+        if (vncContainer) {
+            if (vncContainer.style.display === 'none') {
+                showVncViewer();
+            } else {
+                hideVncViewer();
+            }
+        }
+    }
+    
     // Function to process visual browsing data from the response
     function processVisualBrowsingData(responseText) {
         try {
@@ -617,6 +709,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
                 
                 initializeVisualBrowsing(data);
+                
+                // Show the VNC viewer
+                showVncViewer();
+                
                 return true;
             }
         } catch (error) {

@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VNC Viewer</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            overflow: hidden;
+        }
+        .container {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+        .header {
+            background-color: #f8f9fa;
+            padding: 10px;
+            border-bottom: 1px solid #dee2e6;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .content {
+            flex: 1;
+            position: relative;
+        }
+        #browser-container {
+            width: 100%;
+            height: 100%;
+            border: none;
+        }
+        .back-button {
+            padding: 8px 16px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .back-button:hover {
+            background-color: #0069d9;
+        }
+        .status {
+            color: #6c757d;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <button class="back-button" onclick="window.location.href='/'">Back to Chat</button>
+            <div class="status">Live Browser Session</div>
+        </div>
+        <div class="content">
+            <!-- Embed browser session here -->
+            <iframe id="browser-container" src="/static/vnc/vnc.html?autoconnect=true&resize=scale&host=localhost&port=6081"></iframe>
+        </div>
+    </div>
+
+    <script>
+        // Check if VNC server is available
+        function checkVncServer() {
+            const iframe = document.getElementById('browser-container');
+            const status = document.querySelector('.status');
+            
+            // If VNC server is not available, show a message
+            if (!iframe.contentWindow || iframe.contentWindow.closed) {
+                status.textContent = 'Browser session not available';
+                status.style.color = '#dc3545';
+            }
+        }
+        
+        // Check after a short delay
+        setTimeout(checkVncServer, 5000);
+    </script>
+</body>
+</html>
