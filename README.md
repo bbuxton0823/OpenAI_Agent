@@ -22,7 +22,7 @@ A Flask web application that provides a multi-agent workforce with specialized c
    pip install -r requirements.txt
    ```
 4. Set up your environment variables in the `.env` file:
-   - Add your OpenAI API key
+   - Add your OpenAI API key **or** provide it in the web UI (see below)
    - (Optional) Add Google Custom Search API key and Custom Search Engine ID
    - (Optional) Add Bing Search API key
 
@@ -33,7 +33,8 @@ A Flask web application that provides a multi-agent workforce with specialized c
    python app.py
    ```
 2. Open your web browser and navigate to `http://127.0.0.1:5000/`
-3. Interact with the agent workforce through the chat interface
+3. Open the **API Key** dropdown in the top-right corner and paste your OpenAI Response API key. Click **Save Key**.
+4. Interact with the agent workforce through the chat interface. The key will be stored in your browser until you click **Delete Key**.
 
 ## Web Search Configuration
 
