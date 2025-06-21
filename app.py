@@ -1,6 +1,7 @@
 from flask import (
     Flask, render_template, request, jsonify,
-    send_from_directory, Response, stream_with_context
+    send_from_directory, Response, stream_with_context,
+    session
 )
 import os
 import json
@@ -52,14 +53,15 @@ openai_api_key = os.getenv("OPENAI_API_KEY")
 anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
 
 if not openai_api_key:
-    raise ValueError("OPENAI_API_KEY not found in .env file")
+    print("Warning: OPENAI_API_KEY not found in .env file. Provide it via the web UI.")
 
 if not anthropic_api_key:
     print("Warning: ANTHROPIC_API_KEY not found in .env file. "
           "Coding agent will fall back to OpenAI.")
 
-# Set the API key for the OpenAI client
-os.environ["OPENAI_API_KEY"] = openai_api_key
+# Set the API key for the OpenAI client if provided
+if openai_api_key:
+    os.environ["OPENAI_API_KEY"] = openai_api_key
 
 # Initialize Anthropic client if API key is available
 anthropic_client = None
@@ -76,6 +78,17 @@ DATA_DIR = Path("user_data")
 DATA_DIR.mkdir(exist_ok=True)
 SCREENSHOTS_DIR = DATA_DIR / "screenshots"
 SCREENSHOTS_DIR.mkdir(exist_ok=True)
+
+# Ensure requests use the correct API key
+@app.before_request
+def apply_openai_key():
+    """Apply API key from request header or session."""
+    header_key = request.headers.get('X-OPENAI-KEY')
+    if header_key:
+        session['openai_api_key'] = header_key
+    key = session.get('openai_api_key', openai_api_key)
+    if key:
+        os.environ['OPENAI_API_KEY'] = key
 
 # File management tools
 
@@ -579,6 +592,13 @@ def vnc_viewer():
 @app.route('/static/<path:path>')
 def serve_static(path):
     return send_from_directory('static', path)
+
+
+@app.route('/api/remove_key', methods=['POST'])
+def remove_api_key():
+    """Remove stored API key from the session."""
+    session.pop('openai_api_key', None)
+    return jsonify({'status': 'removed'})
 
 
 @app.route('/api/chat', methods=['POST'])

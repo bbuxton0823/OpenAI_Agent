@@ -14,6 +14,9 @@ document.addEventListener('DOMContentLoaded', function() {
     const screenshotPreview = document.getElementById('screenshot-preview') || document.createElement('img');
     const themeToggle = document.getElementById('themeToggle');
     const streamingToggle = document.getElementById('streamingToggle');
+    const apiKeyInput = document.getElementById('apiKeyInput');
+    const saveApiKeyBtn = document.getElementById('saveApiKey');
+    const removeApiKeyBtn = document.getElementById('removeApiKey');
     
     // Visual browsing elements
     const visualBrowsingCard = document.getElementById('visual-browsing-card') || document.createElement('div');
@@ -66,6 +69,25 @@ document.addEventListener('DOMContentLoaded', function() {
             themeToggle.innerHTML = '<i class="bi bi-sun-fill"></i> <span>Light Mode</span>';
         }
     }
+
+    // Load stored API key
+    const storedKey = localStorage.getItem('openai_api_key');
+    if (storedKey && apiKeyInput) {
+        apiKeyInput.value = storedKey;
+    }
+
+    saveApiKeyBtn.addEventListener('click', function() {
+        const key = apiKeyInput.value.trim();
+        if (key) {
+            localStorage.setItem('openai_api_key', key);
+        }
+    });
+
+    removeApiKeyBtn.addEventListener('click', function() {
+        localStorage.removeItem('openai_api_key');
+        fetch('/api/remove_key', { method: 'POST' });
+        apiKeyInput.value = '';
+    });
     
     // Function to add a message to the chat
     function addMessage(content, isUser, agentName = null) {
@@ -292,11 +314,15 @@ document.addEventListener('DOMContentLoaded', function() {
         
         try {
             // First, send the message to the server
+            const headers = { 'Content-Type': 'application/json' };
+            const storedKey = localStorage.getItem('openai_api_key');
+            if (storedKey) {
+                headers['X-OPENAI-KEY'] = storedKey;
+            }
+
             const postResponse = await fetch('/api/chat/stream', {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
+                headers,
                 body: JSON.stringify({ message })
             });
             
